@@ -163,3 +163,7 @@ create policy "photos_delete_admin" on public.photos
 update public.profiles
 set is_superadmin = true
 where id = (select id from auth.users where email = 'sinara.vsc@gmail.com');
+
+-- Make the API pick up new functions right away (avoids "could not find the
+-- function ... in the schema cache").
+notify pgrst, 'reload schema';
