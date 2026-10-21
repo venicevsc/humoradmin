@@ -7,7 +7,9 @@ alter table public.profiles
   add column if not exists is_superadmin boolean not null default false;
 
 -- profiles_update_own lets users edit their own row, which would include this
--- column. Only the SQL editor / dashboard (postgres, service_role) may change it.
+-- column. From the API only a superadmin may change it, and never their own
+-- (so nobody can promote themselves or lock the last admin out by accident).
+-- The SQL editor / dashboard (postgres, service_role) can always change it.
 create or replace function public.protect_superadmin_flag()
 returns trigger
 language plpgsql
@@ -15,8 +17,9 @@ set search_path = ''
 as $$
 begin
   if new.is_superadmin is distinct from (case when tg_op = 'INSERT' then false else old.is_superadmin end)
-     and coalesce(auth.role(), '') in ('anon', 'authenticated') then
-    raise exception 'is_superadmin can only be changed from the database dashboard';
+     and coalesce(auth.role(), '') in ('anon', 'authenticated')
+     and (tg_op = 'INSERT' or new.id = auth.uid() or not public.is_superadmin()) then
+    raise exception 'only another superadmin can change is_superadmin' using errcode = '42501';
   end if;
   return new;
 end;
@@ -71,6 +74,33 @@ $$;
 
 revoke all on function public.admin_list_users() from public, anon;
 grant execute on function public.admin_list_users() to authenticated;
+
+-- Grant or revoke admin from the admin panel. Security definer so it can update
+-- someone else's profile past profiles_update_own; the trigger above still
+-- checks that the caller is a superadmin changing someone other than themselves.
+create or replace function public.admin_set_superadmin(p_user_id uuid, p_value boolean)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_superadmin() then
+    raise exception 'superadmin only' using errcode = '42501';
+  end if;
+  if p_user_id = auth.uid() then
+    raise exception 'you can''t change your own admin status' using errcode = '42501';
+  end if;
+
+  update public.profiles set is_superadmin = p_value where id = p_user_id;
+  if not found then
+    raise exception 'user not found';
+  end if;
+end;
+$$;
+
+revoke all on function public.admin_set_superadmin(uuid, boolean) from public, anon;
+grant execute on function public.admin_set_superadmin(uuid, boolean) to authenticated;
 
 -- ------------------------------------------------------------------- RLS --
 -- Added alongside the existing "own row" policies; Postgres ORs them together.
@@ -128,6 +158,7 @@ create policy "photos_delete_admin" on public.photos
 -- which bypasses RLS and the trigger above, so the first superadmin is
 -- granted here, by hand, by whoever owns the Supabase project.
 -- Sign in to the main app with Google once first so the profile row exists.
+-- After that, superadmins can promote others from the Users page.
 
 update public.profiles
 set is_superadmin = true

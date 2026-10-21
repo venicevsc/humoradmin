@@ -4,7 +4,8 @@ Admin area for the Venice-Style Captions database (Next.js 16 + Supabase).
 
 - **Stats** (`/`): laugh rate, hall of fame/shame, most divisive captions, which joke angle lands,
   caption length vs. reception, a day × hour voting heatmap, daily AI runs, critics and top creators.
-- **Users** (`/users`): read-only list of profiles with emails, activity counts and sign-in times.
+- **Users** (`/users`): list of profiles with emails, activity counts and sign-in times; superadmins
+  can grant or revoke admin for other users.
 - **Media** (`/media`, `/media/photos`): create, read, update and delete AI captions and photos.
 - **Votes** (`/votes`): read-only up/downvotes and photo likes.
 
@@ -25,7 +26,9 @@ A trigger stops anyone from setting `is_superadmin` on their own profile through
 Yes, if the flag could only be set from inside the admin area. The way out is that the project owner
 already has access that doesn't go through the app: the Supabase dashboard. The SQL Editor runs as
 the `postgres` role, which bypasses RLS and the trigger, so the first superadmin is granted by hand
-there (the last statement in `supabase/admin.sql`). After that, more admins can be added the same way.
+there (the last statement in `supabase/admin.sql`). After that, any superadmin can make other users
+admins from the Users page (through `admin_set_superadmin()`), but nobody can change their own flag
+from the app, so you can't promote yourself or accidentally remove the last admin by demoting yourself.
 
 ## Setup
 

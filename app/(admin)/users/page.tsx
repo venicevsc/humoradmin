@@ -1,15 +1,16 @@
 import { displayName, fetchAll, formatDate, requireAdmin } from "@/lib/admin";
 import type { Generation, Like, Profile, Vote } from "@/lib/stats";
+import { setSuperadmin } from "./actions";
 
 type AuthUser = { id: string; email: string | null; created_at: string; last_sign_in_at: string | null };
 
 export default async function UsersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; sort?: string }>;
+  searchParams: Promise<{ q?: string; sort?: string; role?: string; error?: string; granted?: string; revoked?: string }>;
 }) {
-  const { supabase } = await requireAdmin();
-  const { q = "", sort = "recent" } = await searchParams;
+  const { supabase, user } = await requireAdmin();
+  const { q = "", sort = "recent", role = "", error: actionError, granted, revoked } = await searchParams;
 
   const [profiles, { data: authUsers, error }, votes, likes, generations] = await Promise.all([
     fetchAll<Profile & { hometown: string | null }>(
@@ -47,6 +48,7 @@ export default async function UsersPage({
       photoRuns: photoRuns.get(p.id) ?? 0,
       chatRuns: chatRuns.get(p.id) ?? 0,
     }))
+    .filter((r) => role !== "admin" || r.is_superadmin)
     .filter((r) => !needle || `${displayName(r, "")} ${r.email ?? ""} ${r.hometown ?? ""}`.toLowerCase().includes(needle))
     .sort((a, b) => {
       if (sort === "active") return b.up + b.down + b.photoRuns + b.chatRuns - (a.up + a.down + a.photoRuns + a.chatRuns);
@@ -58,16 +60,26 @@ export default async function UsersPage({
     <>
       <div className="page-head">
         <div>
-          <p className="eyebrow">Read only</p>
+          <p className="eyebrow">People</p>
           <h1>Users &amp; profiles</h1>
         </div>
-        <span className="muted small">{profiles.length} profiles</span>
+        <span className="muted small">
+          {profiles.length} profiles · {profiles.filter((p) => p.is_superadmin).length} admins
+        </span>
       </div>
+
+      {actionError && <p className="notice error" role="alert">{actionError}</p>}
+      {granted && <p className="notice" role="status">Admin access granted.</p>}
+      {revoked && <p className="notice" role="status">Admin access removed.</p>}
 
       {error && <p className="notice error">Couldn&apos;t load emails: {error.message}</p>}
 
       <form className="toolbar" action="/users">
         <input name="q" placeholder="Search name, email, hometown…" defaultValue={q} style={{ flex: 1, minWidth: 200 }} />
+        <select name="role" defaultValue={role}>
+          <option value="">Everyone</option>
+          <option value="admin">Admins only</option>
+        </select>
         <select name="sort" defaultValue={sort}>
           <option value="recent">Last sign-in</option>
           <option value="joined">Newest accounts</option>
@@ -90,12 +102,13 @@ export default async function UsersPage({
               <th className="num">AI runs</th>
               <th>Joined</th>
               <th>Last sign-in</th>
+              <th>Admin</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="muted">
+                <td colSpan={9} className="muted">
                   No users match.
                 </td>
               </tr>
@@ -129,6 +142,25 @@ export default async function UsersPage({
                 </td>
                 <td className="small muted">{formatDate(r.created_at)}</td>
                 <td className="small muted">{formatDate(r.lastSignIn)}</td>
+                <td>
+                  {r.id === user.id ? (
+                    <span className="small muted" title="Ask another superadmin to change your status">
+                      You
+                    </span>
+                  ) : (
+                    <form action={setSuperadmin}>
+                      <input type="hidden" name="user_id" value={r.id} />
+                      <input type="hidden" name="value" value={String(!r.is_superadmin)} />
+                      <button
+                        type="submit"
+                        className={`button ${r.is_superadmin ? "danger" : ""}`}
+                        style={{ padding: "4px 10px", fontSize: 13 }}
+                      >
+                        {r.is_superadmin ? "Remove admin" : "Make admin"}
+                      </button>
+                    </form>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
